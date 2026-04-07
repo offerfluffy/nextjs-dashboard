@@ -6,6 +6,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { signIn } from "@/auth";
 import { AuthError } from "next-auth";
+import bcrypt from "bcrypt";
+import { getUser } from "./data";
 
 const sql = postgres(process.env.POSTGRES_URL!, { ssl: "require" });
 
@@ -128,6 +130,81 @@ export async function authenticate(
           return "Invalid credentials.";
         default:
           return "Something went wrong.";
+      }
+    }
+    throw error;
+  }
+}
+
+const RegisterSchema = z.object({
+  name: z.string().min(1),
+  email: z.string().email({ message: "Invalid email address" }),
+  password: z.string().min(6),
+  confirmPassword: z.string().min(6),
+});
+
+export type RegisterState = {
+  errors?: {
+    name?: string[];
+    email?: string[];
+    password?: string[];
+    confirmPassword?: string[];
+  };
+  message?: string | null;
+};
+
+export async function register(
+  prevState: RegisterState | undefined,
+  formData: FormData,
+) {
+  const validatedFields = RegisterSchema.safeParse({
+    name: formData.get("name"),
+    email: formData.get("email"),
+    password: formData.get("password"),
+    confirmPassword: formData.get("confirmPassword"),
+  });
+
+  if (!validatedFields.success) {
+    return {
+      errors: validatedFields.error.flatten().fieldErrors,
+      message: "Missing Fields. Failed to Create Account.",
+    };
+  }
+
+  const { name, email, password, confirmPassword } = validatedFields.data;
+
+  if (password !== confirmPassword) {
+    return {
+      message: "Passwords do not match.",
+    };
+  }
+
+  const hashedPassword = await bcrypt.hash(password, 10);
+
+  const user = await getUser(email);
+
+  if (user) {
+    return { message: "User already exists." };
+  }
+
+  try {
+    await sql`
+    INSERT INTO users (name, email, password)
+    VALUES (${name}, ${email}, ${hashedPassword})
+  `;
+  } catch (error) {
+    return { message: "Database Error: Failed to Register." };
+  }
+
+  try {
+    await signIn("credentials", formData);
+  } catch (error) {
+    if (error instanceof AuthError) {
+      switch (error.type) {
+        case "CredentialsSignin":
+          return { message: "Invalid credentials." };
+        default:
+          return { message: "Something went wrong." };
       }
     }
     throw error;

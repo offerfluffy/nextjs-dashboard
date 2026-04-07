@@ -122,6 +122,7 @@ export async function authenticate(
   formData: FormData,
 ) {
   try {
+    revalidatePath("/dashboard", "layout");
     await signIn("credentials", formData);
   } catch (error) {
     if (error instanceof AuthError) {
@@ -197,6 +198,7 @@ export async function register(
   }
 
   try {
+    revalidatePath("/dashboard", "layout");
     await signIn("credentials", formData);
   } catch (error) {
     if (error instanceof AuthError) {
